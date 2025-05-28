@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>Live Audio Client</title>
+    <style>
+        body { font-family: sans-serif; padding: 1rem; }
+        #controls { margin-bottom: 1rem; }
+        input { width: 300px; padding: .5rem; }
+        button { padding: .5rem 1rem; }
+    </style>
+</head>
+<body>
+<div id="controls">
+    <input id="text-input" type="text" placeholder="Введите сообщение" />
+    <button id="send-btn">Отправить</button>
+</div>
+<script>
+    const WS_URL = "ws://localhost:8000/ws";
+    const SAMPLE_RATE = 24000;
+
+    // AudioContext для воспроизведения
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: SAMPLE_RATE
+    });
+
+    // Время, до которого запланированы воспроизведения
+    let nextPlayTime = audioCtx.currentTime;
+
+    const ws = new WebSocket(WS_URL);
+    ws.binaryType = "arraybuffer";
+
+    ws.onopen = () => console.log("WebSocket открыт");
+    ws.onclose = () => console.log("WebSocket закрыт");
+    ws.onerror = e => console.error("WebSocket ошибка", e);
+
+    // При получении чанка: конвертируем, создаём буфер и запланированно воспроизводим
+    ws.onmessage = event => {
+      const data = new Int16Array(event.data);
+      const float32 = new Float32Array(data.length);
+      for (let i = 0; i < data.length; i++) {
+        float32[i] = data[i] / 32767;
+      }
+      const audioBuffer = audioCtx.createBuffer(1, float32.length, SAMPLE_RATE);
+      audioBuffer.getChannelData(0).set(float32);
+
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(audioCtx.destination);
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      src.start(nextPlayTime);
+      nextPlayTime += audioBuffer.duration;
+    };
+
+    // Отправка текста на сервер
+    document.getElementById("send-btn").onclick = () => {
+      const text = document.getElementById("text-input").value.trim();
+      if (!text) return;
+      // Сброс базового времени для новой реплики
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      nextPlayTime = audioCtx.currentTime;
+      ws.send(text);
+      document.getElementById("text-input").value = "";
+    };
+</script>
+</body>
+</html>
